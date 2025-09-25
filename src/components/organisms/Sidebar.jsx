@@ -1,9 +1,15 @@
-import React from "react";
+import React, { useContext } from "react";
 import { NavLink } from "react-router-dom";
-import ApperIcon from "@/components/ApperIcon";
+import { useSelector } from "react-redux";
+import { AuthContext } from "@/App";
 import { cn } from "@/utils/cn";
+import ApperIcon from "@/components/ApperIcon";
+import Button from "@/components/atoms/Button";
 
 const Sidebar = ({ isOpen, onClose }) => {
+  const { logout } = useContext(AuthContext);
+  const user = useSelector((state) => state.user.user);
+  
   const navigation = [
     { name: "Dashboard", href: "/", icon: "LayoutDashboard" },
     { name: "Rooms", href: "/rooms", icon: "Bed" },
@@ -14,6 +20,14 @@ const Sidebar = ({ isOpen, onClose }) => {
     { name: "Staff", href: "/staff", icon: "Users" },
     { name: "Reports", href: "/reports", icon: "BarChart3" }
   ];
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
 
   // Desktop Sidebar - Static positioning
   const DesktopSidebar = () => (
@@ -60,6 +74,35 @@ const Sidebar = ({ isOpen, onClose }) => {
             </NavLink>
           ))}
         </nav>
+
+        {/* User Info & Logout */}
+        <div className="px-4 pb-4 border-t border-slate-200 pt-4">
+          {user && (
+            <div className="mb-4 p-3 bg-slate-50 rounded-lg">
+              <div className="flex items-center">
+                <div className="h-8 w-8 bg-primary rounded-full flex items-center justify-center">
+                  <ApperIcon name="User" className="h-4 w-4 text-white" />
+                </div>
+                <div className="ml-2">
+                  <p className="text-sm font-medium text-slate-900">
+                    {user.firstName} {user.lastName}
+                  </p>
+                  <p className="text-xs text-slate-500">{user.emailAddress}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <Button
+            onClick={handleLogout}
+            variant="outline"
+            size="sm"
+            className="w-full justify-start text-slate-600 hover:text-slate-900 border-slate-200"
+          >
+            <ApperIcon name="LogOut" className="h-4 w-4 mr-2" />
+            Logout
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -133,6 +176,35 @@ const Sidebar = ({ isOpen, onClose }) => {
               </NavLink>
             ))}
           </nav>
+
+          {/* Mobile User Info & Logout */}
+          <div className="px-4 pb-4 border-t border-slate-200 pt-4">
+            {user && (
+              <div className="mb-4 p-3 bg-slate-50 rounded-lg">
+                <div className="flex items-center">
+                  <div className="h-8 w-8 bg-primary rounded-full flex items-center justify-center">
+                    <ApperIcon name="User" className="h-4 w-4 text-white" />
+                  </div>
+                  <div className="ml-2">
+                    <p className="text-sm font-medium text-slate-900">
+                      {user.firstName} {user.lastName}
+                    </p>
+                    <p className="text-xs text-slate-500">{user.emailAddress}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <Button
+              onClick={handleLogout}
+              variant="outline"
+              size="sm"
+              className="w-full justify-start text-slate-600 hover:text-slate-900 border-slate-200"
+            >
+              <ApperIcon name="LogOut" className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
       </div>
     </>
