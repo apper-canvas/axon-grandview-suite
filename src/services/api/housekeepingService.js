@@ -403,5 +403,3 @@ class HousekeepingService {
 }
 
 export const housekeepingService = new HousekeepingService();
-
-export const housekeepingService = new HousekeepingService();
