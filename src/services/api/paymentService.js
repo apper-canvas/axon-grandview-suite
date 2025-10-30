@@ -1,129 +1,222 @@
-import paymentsData from "@/services/mockData/payments.json";
-import bookingsData from "@/services/mockData/bookings.json";
+const { ApperClient } = window.ApperSDK;
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const apperClient = new ApperClient({
+  apperProjectId: import.meta.env.VITE_APPER_PROJECT_ID,
+  apperPublicKey: import.meta.env.VITE_APPER_PUBLIC_KEY,
+});
 
-let payments = [...paymentsData];
-let bookings = [...bookingsData];
-
-const paymentService = {
-  // Get all payments
-  async getAll() {
-    await delay(300);
-    return [...payments].sort((a, b) => new Date(b.processedAt) - new Date(a.processedAt));
-  },
-
-  // Get payment by ID
-  async getById(id) {
-    await delay(200);
-    const payment = payments.find(p => p.Id === parseInt(id));
-    if (!payment) {
-      throw new Error(`Payment with ID ${id} not found`);
-    }
-    return { ...payment };
-  },
-
-  // Create new payment
-  async create(paymentData) {
-    await delay(500);
-    
-    const newPayment = {
-      ...paymentData,
-      Id: Math.max(...payments.map(p => p.Id), 0) + 1,
-      processedAt: new Date().toISOString(),
-      transactionId: `TXN_${new Date().getFullYear()}_${String(Math.max(...payments.map(p => p.Id), 0) + 1).padStart(3, '0')}`
+const getAll = async () => {
+  try {
+    const params = {
+      fields: [
+        { field: { Name: "Id" } },
+        { field: { Name: "amount_c" } },
+        { field: { Name: "payment_method_c" } },
+        { field: { Name: "payment_status_c" } },
+        { field: { Name: "transaction_id_c" } },
+        { field: { Name: "payment_date_c" } },
+        { field: { Name: "notes_c" } },
+        { field: { Name: "booking_id_c" } },
+      ],
+      orderBy: [{ fieldName: "Id", sorttype: "DESC" }],
     };
-    
-    payments.push(newPayment);
-    return { ...newPayment };
-  },
-async createPendingPayment(paymentData) {
-    await delay(300); // Simulate API call
-    
-    const pendingPayment = {
-      ...paymentData,
-      Id: Math.max(...payments.map(p => p.Id), 0) + 1,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      transactionId: `PND_${new Date().getFullYear()}_${String(Math.max(...payments.map(p => p.Id), 0) + 1).padStart(3, '0')}`
-    };
-    
-    payments.push(pendingPayment);
-    return { ...pendingPayment };
-  },
 
-  async processPayment(paymentData) {
-    await delay(800); // Simulate payment processing time
-    
-    // Simulate payment processing with 95% success rate
-    const isSuccessful = Math.random() > 0.05;
-    
-    const payment = {
-      ...paymentData,
-      Id: Math.max(...payments.map(p => p.Id), 0) + 1,
-      status: isSuccessful ? 'completed' : 'failed',
-      processedAt: new Date().toISOString(),
-      transactionId: `TXN_${new Date().getFullYear()}_${String(Math.max(...payments.map(p => p.Id), 0) + 1).padStart(3, '0')}`
-    };
-    
-    payments.push(payment);
-    
-    // Update booking payment status if successful
-    if (isSuccessful && paymentData.bookingId) {
-      const bookingIndex = bookings.findIndex(b => b.Id === parseInt(paymentData.bookingId));
-      if (bookingIndex !== -1) {
-        bookings[bookingIndex] = {
-          ...bookings[bookingIndex],
-          paidAmount: paymentData.amount,
-          status: 'confirmed'
-        };
-      }
-    }
-    
-    if (!isSuccessful) {
-      throw new Error('Payment processing failed. Please try again.');
-    }
-    
-    return { ...payment };
-  },
+    const response = await apperClient.fetchRecords("payment_c", params);
 
-  // Delete payment
-  async delete(id) {
-    await delay(200);
-    const index = payments.findIndex(p => p.Id === parseInt(id));
-    if (index === -1) {
-      throw new Error(`Payment with ID ${id} not found`);
+    if (!response.success) {
+      console.error(response.message);
+      return [];
     }
-    
-    payments.splice(index, 1);
-    return { success: true };
-  },
 
-  // Get payment statistics
-  async getStats() {
-    await delay(250);
-    
-    const totalRevenue = payments
-      .filter(p => p.status === 'completed')
-      .reduce((sum, p) => sum + p.amount, 0);
-    
-    const todaysPayments = payments.filter(p => {
-      const today = new Date().toDateString();
-      const paymentDate = new Date(p.processedAt).toDateString();
-      return paymentDate === today && p.status === 'completed';
-    });
-    
-    const todaysRevenue = todaysPayments.reduce((sum, p) => sum + p.amount, 0);
-    
-    return {
-      totalRevenue,
-      todaysRevenue,
-      totalTransactions: payments.filter(p => p.status === 'completed').length,
-      todaysTransactions: todaysPayments.length,
-      pendingPayments: payments.filter(p => p.status === 'pending').length,
-      failedPayments: payments.filter(p => p.status === 'failed').length
-    };
+    return response.data || [];
+  } catch (error) {
+    console.error("Error fetching payments:", error?.response?.data?.message || error);
+    return [];
   }
 };
 
-export default paymentService;
+const getById = async (id) => {
+  try {
+    const params = {
+      fields: [
+        { field: { Name: "Id" } },
+        { field: { Name: "amount_c" } },
+        { field: { Name: "payment_method_c" } },
+        { field: { Name: "payment_status_c" } },
+        { field: { Name: "transaction_id_c" } },
+        { field: { Name: "payment_date_c" } },
+        { field: { Name: "notes_c" } },
+        { field: { Name: "booking_id_c" } },
+      ],
+    };
+
+    const response = await apperClient.getRecordById("payment_c", id, params);
+
+    if (!response.success) {
+      console.error(response.message);
+      return null;
+    }
+
+    return response.data || null;
+  } catch (error) {
+    console.error(`Error fetching payment ${id}:`, error?.response?.data?.message || error);
+    return null;
+  }
+};
+
+const create = async (paymentData) => {
+  try {
+    const params = {
+      records: [
+        {
+          amount_c: paymentData.amount_c,
+          payment_method_c: paymentData.payment_method_c,
+          payment_status_c: paymentData.payment_status_c,
+          transaction_id_c: paymentData.transaction_id_c,
+          payment_date_c: paymentData.payment_date_c,
+          notes_c: paymentData.notes_c || "",
+          booking_id_c: paymentData.booking_id_c ? parseInt(paymentData.booking_id_c) : null,
+        },
+      ],
+    };
+
+    const response = await apperClient.createRecord("payment_c", params);
+
+    if (!response.success) {
+      console.error(response.message);
+      return null;
+    }
+
+    if (response.results) {
+      const successful = response.results.filter((r) => r.success);
+      const failed = response.results.filter((r) => !r.success);
+
+      if (failed.length > 0) {
+        console.error(`Failed to create payment:`, failed);
+        return null;
+      }
+
+      return successful[0]?.data || null;
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error creating payment:", error?.response?.data?.message || error);
+    return null;
+  }
+};
+
+const update = async (id, paymentData) => {
+  try {
+    const params = {
+      records: [
+        {
+          Id: parseInt(id),
+          amount_c: paymentData.amount_c,
+          payment_method_c: paymentData.payment_method_c,
+          payment_status_c: paymentData.payment_status_c,
+          transaction_id_c: paymentData.transaction_id_c,
+          payment_date_c: paymentData.payment_date_c,
+          notes_c: paymentData.notes_c || "",
+          booking_id_c: paymentData.booking_id_c ? parseInt(paymentData.booking_id_c) : null,
+        },
+      ],
+    };
+
+    const response = await apperClient.updateRecord("payment_c", params);
+
+    if (!response.success) {
+      console.error(response.message);
+      return null;
+    }
+
+    if (response.results) {
+      const successful = response.results.filter((r) => r.success);
+      const failed = response.results.filter((r) => !r.success);
+
+      if (failed.length > 0) {
+        console.error(`Failed to update payment ${id}:`, failed);
+        return null;
+      }
+
+      return successful[0]?.data || null;
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`Error updating payment ${id}:`, error?.response?.data?.message || error);
+    return null;
+  }
+};
+
+const deletePayment = async (id) => {
+  try {
+    const params = {
+      RecordIds: [parseInt(id)],
+    };
+
+    const response = await apperClient.deleteRecord("payment_c", params);
+
+    if (!response.success) {
+      console.error(response.message);
+      return false;
+    }
+
+    if (response.results) {
+      const failed = response.results.filter((r) => !r.success);
+
+      if (failed.length > 0) {
+        console.error(`Failed to delete payment ${id}:`, failed);
+        return false;
+      }
+
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error(`Error deleting payment ${id}:`, error?.response?.data?.message || error);
+    return false;
+  }
+};
+
+const getUnpaidBookings = async () => {
+  try {
+    const params = {
+      fields: [
+        { field: { Name: "Id" } },
+        { field: { Name: "Name" } },
+        { field: { Name: "guest_name_c" } },
+        { field: { Name: "total_amount_c" } },
+      ],
+      where: [
+        {
+          FieldName: "payment_status_c",
+          Operator: "EqualTo",
+          Values: ["Unpaid"],
+        },
+      ],
+    };
+
+    const response = await apperClient.fetchRecords("booking_c", params);
+
+    if (!response.success) {
+      console.error(response.message);
+      return [];
+    }
+
+    return response.data || [];
+  } catch (error) {
+    console.error("Error fetching unpaid bookings:", error?.response?.data?.message || error);
+    return [];
+  }
+};
+
+export default {
+  getAll,
+  getById,
+  create,
+  update,
+  delete: deletePayment,
+  getUnpaidBookings,
+};
