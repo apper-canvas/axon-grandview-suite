@@ -1,6 +1,5 @@
 import { getApperClient } from '@/services/apperClient';
-import notificationsData from "@/services/mockData/notifications.json";
-import chartDataJson from "@/services/mockData/chartData.json";
+import { getApperClient } from "@/services/apperClient";
 
 // Simulate API delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -89,49 +88,153 @@ async getActivities() {
   },
 
   // Get notifications
-  async getNotifications() {
-    await delay(250);
-    
-    // Sort by timestamp descending and return copy
-    return [...notificationsData].sort((a, b) => 
-      new Date(b.timestamp) - new Date(a.timestamp)
-    );
-  },
-
-  // Get chart data for revenue
-  async getChartData() {
-    await delay(350);
-    
-    // Add slight variations to make it feel more real-time
-    const updatedChartData = { ...chartDataJson };
-    
-    // Update the last data point in daily chart with slight variation
-    const dailyData = [...updatedChartData.daily.data];
-    const lastDayIndex = dailyData.length - 1;
-    dailyData[lastDayIndex] = {
-      ...dailyData[lastDayIndex],
-      value: Math.round(generateFluctuation(dailyData[lastDayIndex].value, 0.05))
-    };
-    
-    updatedChartData.daily = {
-      ...updatedChartData.daily,
-      data: dailyData,
-      total: dailyData.reduce((sum, item) => sum + item.value, 0)
-    };
-    
-    return updatedChartData;
-  },
-
-  // Dismiss notification
-  async dismissNotification(notificationId) {
-    await delay(150);
-    
-    const notification = notificationsData.find(n => n.Id === notificationId);
-    if (notification) {
-      notification.read = true;
+async getNotifications() {
+    try {
+      const apperClient = getApperClient();
+      
+      const response = await apperClient.fetchRecords('notification_c', {
+        fields: [
+          { field: { Name: "Id" } },
+          { field: { Name: "message_c" } },
+          { field: { Name: "type_c" } },
+          { field: { Name: "timestamp_c" } },
+          { field: { Name: "read_c" } }
+        ],
+        orderBy: [{ fieldName: "timestamp_c", sorttype: "DESC" }],
+        pagingInfo: { limit: 50, offset: 0 }
+      });
+      
+      if (!response.success || !response.data) {
+        console.error("Error fetching notifications:", response.message);
+        return [];
+      }
+      
+      // Map database fields to expected format
+      return response.data.map(notification => ({
+        Id: notification.Id,
+        message: notification.message_c,
+        type: notification.type_c,
+        timestamp: notification.timestamp_c,
+        read: notification.read_c
+      }));
+    } catch (error) {
+      console.error("Error fetching notifications:", error?.message || error);
+      return [];
     }
-    
-    return { success: true };
+  },
+
+// Get chart data for revenue
+  async getChartData() {
+    try {
+      const apperClient = getApperClient();
+      
+      // Fetch data for different periods in parallel
+      const [dailyResponse, weeklyResponse, monthlyResponse] = await Promise.all([
+        apperClient.fetchRecords('chart_data_c', {
+          fields: [
+            { field: { Name: "label_c" } },
+            { field: { Name: "value_c" } },
+            { field: { Name: "date_c" } }
+          ],
+          where: [{ FieldName: "period_c", Operator: "EqualTo", Values: ["daily"] }],
+          orderBy: [{ fieldName: "date_c", sorttype: "ASC" }],
+          pagingInfo: { limit: 30, offset: 0 }
+        }),
+        apperClient.fetchRecords('chart_data_c', {
+          fields: [
+            { field: { Name: "label_c" } },
+            { field: { Name: "value_c" } },
+            { field: { Name: "date_c" } }
+          ],
+          where: [{ FieldName: "period_c", Operator: "EqualTo", Values: ["weekly"] }],
+          orderBy: [{ fieldName: "date_c", sorttype: "ASC" }],
+          pagingInfo: { limit: 12, offset: 0 }
+        }),
+        apperClient.fetchRecords('chart_data_c', {
+          fields: [
+            { field: { Name: "label_c" } },
+            { field: { Name: "value_c" } },
+            { field: { Name: "date_c" } }
+          ],
+          where: [{ FieldName: "period_c", Operator: "EqualTo", Values: ["monthly"] }],
+          orderBy: [{ fieldName: "date_c", sorttype: "ASC" }],
+          pagingInfo: { limit: 12, offset: 0 }
+        })
+      ]);
+      
+      // Process daily data
+      const dailyData = dailyResponse.success && dailyResponse.data
+        ? dailyResponse.data.map(item => ({
+            label: item.label_c,
+            value: item.value_c,
+            date: item.date_c
+          }))
+        : [];
+      
+      // Process weekly data
+      const weeklyData = weeklyResponse.success && weeklyResponse.data
+        ? weeklyResponse.data.map(item => ({
+            label: item.label_c,
+            value: item.value_c,
+            date: item.date_c
+          }))
+        : [];
+      
+      // Process monthly data
+      const monthlyData = monthlyResponse.success && monthlyResponse.data
+        ? monthlyResponse.data.map(item => ({
+            label: item.label_c,
+            value: item.value_c,
+            date: item.date_c
+          }))
+        : [];
+      
+      return {
+        daily: {
+          data: dailyData,
+          total: dailyData.reduce((sum, item) => sum + item.value, 0)
+        },
+        weekly: {
+          data: weeklyData,
+          total: weeklyData.reduce((sum, item) => sum + item.value, 0)
+        },
+        monthly: {
+          data: monthlyData,
+          total: monthlyData.reduce((sum, item) => sum + item.value, 0)
+        }
+      };
+    } catch (error) {
+      console.error("Error fetching chart data:", error?.message || error);
+      return {
+        daily: { data: [], total: 0 },
+        weekly: { data: [], total: 0 },
+        monthly: { data: [], total: 0 }
+      };
+    }
+  },
+
+// Dismiss notification
+  async dismissNotification(notificationId) {
+    try {
+      const apperClient = getApperClient();
+      
+      const response = await apperClient.updateRecord('notification_c', {
+        records: [{
+          Id: notificationId,
+          read_c: true
+        }]
+      });
+      
+      if (!response.success) {
+        console.error("Error dismissing notification:", response.message);
+        return { success: false, message: response.message };
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error("Error dismissing notification:", error?.message || error);
+      return { success: false, message: error?.message || "Failed to dismiss notification" };
+    }
   },
 
   // Get dashboard overview (combined data)
