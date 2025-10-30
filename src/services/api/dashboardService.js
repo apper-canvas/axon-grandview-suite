@@ -1,5 +1,4 @@
 import kpiMetricsData from "@/services/mockData/kpiMetrics.json";
-import activitiesData from "@/services/mockData/activities.json";
 import notificationsData from "@/services/mockData/notifications.json";
 import chartDataJson from "@/services/mockData/chartData.json";
 
@@ -27,13 +26,36 @@ export const dashboardService = {
   },
 
   // Get recent activities
-  async getActivities() {
-    await delay(200);
-    
-    // Sort by timestamp descending and return copy
-    return [...activitiesData].sort((a, b) => 
-      new Date(b.timestamp) - new Date(a.timestamp)
-    );
+async getActivities() {
+    try {
+      const { ApperClient } = window.ApperSDK;
+      const apperClient = new ApperClient({
+        apperProjectId: import.meta.env.VITE_APPER_PROJECT_ID,
+        apperPublicKey: import.meta.env.VITE_APPER_PUBLIC_KEY
+      });
+
+      const response = await apperClient.fetchRecords('activity_c', {
+        fields: [
+          { field: { Name: "Id" } },
+          { field: { Name: "type_c" } },
+          { field: { Name: "message_c" } },
+          { field: { Name: "timestamp_c" } },
+          { field: { Name: "user_c" } },
+          { field: { Name: "details_c" } }
+        ],
+        orderBy: [{ fieldName: "timestamp_c", sorttype: "DESC" }]
+      });
+
+      if (!response.success) {
+        console.error('Failed to fetch activities:', response.message);
+        return [];
+      }
+
+      return response.data || [];
+    } catch (error) {
+      console.error('Error fetching activities:', error?.message || error);
+      return [];
+    }
   },
 
   // Get notifications
