@@ -1,4 +1,4 @@
-import kpiMetricsData from "@/services/mockData/kpiMetrics.json";
+import { getApperClient } from '@/services/apperClient';
 import notificationsData from "@/services/mockData/notifications.json";
 import chartDataJson from "@/services/mockData/chartData.json";
 
@@ -13,16 +13,46 @@ const generateFluctuation = (baseValue, percentage = 0.1) => {
 
 export const dashboardService = {
   // Get all KPI metrics with real-time updates
-  async getKPIMetrics() {
+async getKPIMetrics() {
     await delay(300);
     
-    return kpiMetricsData.map(metric => ({
-      ...metric,
-      value: metric.unit === "%" || metric.unit === "rating" 
-        ? parseFloat(generateFluctuation(metric.value, 0.05).toFixed(1))
-        : Math.round(generateFluctuation(metric.value, 0.08)),
-      lastUpdated: new Date().toISOString()
-    }));
+    try {
+      const apperClient = getApperClient();
+      if (!apperClient) {
+        console.error('ApperClient not available for KPI metrics fetch');
+        return [];
+      }
+
+      const response = await apperClient.fetchRecords('kpi_metric_c', {
+        fields: [
+          {"field": {"Name": "label_c"}},
+          {"field": {"Name": "value_c"}},
+          {"field": {"Name": "unit_c"}},
+          {"field": {"Name": "trend_c"}},
+          {"field": {"Name": "icon_c"}},
+          {"field": {"Name": "color_c"}}
+        ],
+        orderBy: [{"fieldName": "Id", "sorttype": "ASC"}]
+      });
+
+      if (!response?.success || !response?.data) {
+        console.error('Failed to fetch KPI metrics:', response?.message || 'Unknown error');
+        return [];
+      }
+
+      return response.data.map(metric => ({
+        label: metric.label_c || 'Unknown',
+        value: metric.value_c || 0,
+        unit: metric.unit_c || '',
+        trend: metric.trend_c || 0,
+        icon: metric.icon_c || 'TrendingUp',
+        color: metric.color_c || 'primary',
+        lastUpdated: new Date().toISOString()
+      }));
+    } catch (error) {
+      console.error('Error fetching KPI metrics:', error?.message || error);
+      return [];
+    }
   },
 
   // Get recent activities
