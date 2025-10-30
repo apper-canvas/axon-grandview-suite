@@ -1,5 +1,4 @@
 import { getApperClient } from '@/services/apperClient';
-import { getApperClient } from "@/services/apperClient";
 
 // Simulate API delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
