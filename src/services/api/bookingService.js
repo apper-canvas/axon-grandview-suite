@@ -1,288 +1,402 @@
-import bookingsData from "@/services/mockData/bookings.json";
+import { toast } from "react-toastify";
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+// Helper function for simulated delay
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-let bookings = [...bookingsData];
+// Get ApperClient instance
+const getApperClient = () => {
+  if (!window.ApperSDK) {
+    console.error('ApperSDK not available');
+    return null;
+  }
+  
+  const { ApperClient } = window.ApperSDK;
+  return new ApperClient({
+    apperProjectId: import.meta.env.VITE_APPER_PROJECT_ID,
+    apperPublicKey: import.meta.env.VITE_APPER_PUBLIC_KEY
+  });
+};
 
-// Audit log storage
-let auditLog = [];
-
-const bookingService = {
-  // Get all bookings
-  async getAll() {
+// Get all bookings with optional filtering
+const getAll = async (filters = {}) => {
+  try {
     await delay(300);
-    return [...bookings];
-  },
-
-  // Get booking by ID
-  async getById(id) {
-    await delay(200);
-    const booking = bookings.find(b => b.Id === parseInt(id));
-    if (!booking) {
-      throw new Error(`Booking with ID ${id} not found`);
-    }
-    return { ...booking };
-  },
-
-  // Get unpaid bookings
-  async getUnpaidBookings() {
-    await delay(250);
-    return bookings.filter(b => b.paidAmount < b.totalAmount);
-  },
-
-  // Get filtered bookings
-  async getFilteredBookings(filters) {
-    await delay(300);
-    let filtered = [...bookings];
     
+    const apperClient = getApperClient();
+    if (!apperClient) {
+      throw new Error('ApperClient not initialized');
+    }
+
+    const params = {
+      fields: [
+        { field: { Name: "Id" } },
+        { field: { Name: "guest_name_c" } },
+        { field: { Name: "room_number_c" } },
+        { field: { Name: "check_in_date_c" } },
+        { field: { Name: "check_out_date_c" } },
+        { field: { Name: "status_c" } },
+        { field: { Name: "total_amount_c" } },
+        { field: { Name: "special_requests_c" } }
+      ],
+      orderBy: [{ fieldName: "check_in_date_c", sorttype: "DESC" }],
+      pagingInfo: { limit: 100, offset: 0 }
+    };
+
+    // Add status filter if provided
     if (filters.status) {
-      filtered = filtered.filter(b => b.status === filters.status);
+      params.whereGroups = [{
+        operator: "OR",
+        subGroups: [{
+          conditions: [{
+            fieldName: "status_c",
+            operator: "EqualTo",
+            values: [filters.status]
+          }],
+          operator: ""
+        }]
+      }];
     }
-    
-    if (filters.dateFrom) {
-      filtered = filtered.filter(b => new Date(b.checkIn) >= new Date(filters.dateFrom));
-    }
-    
-    if (filters.dateTo) {
-      filtered = filtered.filter(b => new Date(b.checkOut) <= new Date(filters.dateTo));
-    }
-    
-    if (filters.guestName) {
-      filtered = filtered.filter(b => 
-        b.guestName.toLowerCase().includes(filters.guestName.toLowerCase())
-      );
-    }
-    
-    return filtered;
-  },
 
-  // Update booking status
-  async updateBookingStatus(id, newStatus) {
-    await delay(400);
-    const bookingIndex = bookings.findIndex(b => b.Id === parseInt(id));
-    if (bookingIndex === -1) {
-      throw new Error(`Booking with ID ${id} not found`);
+    const response = await apperClient.fetchRecords('booking_c', params);
+
+    if (!response.success) {
+      console.error(response.message);
+      toast.error(response.message);
+      return [];
     }
-    
-    const oldStatus = bookings[bookingIndex].status;
-    bookings[bookingIndex].status = newStatus;
-    bookings[bookingIndex].updatedAt = new Date().toISOString();
-    
-    // Log audit entry
-    this.logAuditEntry({
-      bookingId: parseInt(id),
-      action: 'status_update',
-      oldValue: oldStatus,
-      newValue: newStatus,
-      timestamp: new Date().toISOString(),
-      user: 'System' // In real app, would be current user
-    });
-    
-    // Trigger housekeeping notification if needed
-    if (newStatus === 'confirmed' || newStatus === 'checked_out') {
-      await this.notifyHousekeeping(bookings[bookingIndex]);
+
+    if (!response.data || response.data.length === 0) {
+      return [];
     }
-    
-    return { ...bookings[bookingIndex] };
-  },
 
-  // Log audit entry
-  logAuditEntry(entry) {
-    auditLog.push({
-      id: auditLog.length + 1,
-      ...entry
-    });
-  },
-
-  // Get audit log for booking
-  async getAuditLog(bookingId) {
-    await delay(200);
-    return auditLog.filter(entry => entry.bookingId === parseInt(bookingId));
-  },
-
-  // Notify housekeeping service
-  async notifyHousekeeping(booking) {
-    try {
-      // In real implementation, this would call housekeeping service
-      console.log(`Housekeeping notified for room ${booking.roomNumber}`, {
-        bookingId: booking.Id,
-        guestName: booking.guestName,
-        status: booking.status,
-        checkIn: booking.checkIn,
-        checkOut: booking.checkOut
-      });
-    } catch (error) {
-      console.error('Failed to notify housekeeping:', error);
-    }
-  },
-
-  // Search available rooms
-  async searchAvailableRooms(searchCriteria) {
-    await delay(400);
-    const { checkIn, checkOut, guests, roomTypes } = searchCriteria;
-    
-    // Import room data dynamically to avoid circular imports
-    const roomsModule = await import("@/services/mockData/rooms.json");
-    const rooms = roomsModule.default;
-    
-    // Check for conflicting bookings
-    const conflictingBookings = bookings.filter(booking => {
-      if (booking.status === 'cancelled') return false;
-      
-      const bookingCheckIn = new Date(booking.checkIn);
-      const bookingCheckOut = new Date(booking.checkOut);
-      const searchCheckIn = new Date(checkIn);
-      const searchCheckOut = new Date(checkOut);
-      
-      return (searchCheckIn < bookingCheckOut && searchCheckOut > bookingCheckIn);
-    });
-    
-    const occupiedRoomNumbers = conflictingBookings.map(b => b.roomNumber);
-    
-    // Filter available rooms
-    let availableRooms = rooms.filter(room => {
-      const isNotOccupied = !occupiedRoomNumbers.includes(room.roomNumber);
-      const isOperational = ['Available', 'Cleaning'].includes(room.status);
-      const matchesRoomType = !roomTypes || roomTypes.length === 0 || roomTypes.includes(room.roomType);
-      
-      return isNotOccupied && isOperational && matchesRoomType;
-    });
-    
-    // Add calculated pricing
-    const nights = this.calculateNights(checkIn, checkOut);
-    availableRooms = availableRooms.map(room => ({
-      ...room,
-      nights,
-      subtotal: room.nightlyRate * nights,
-      taxes: Math.round(room.nightlyRate * nights * 0.12 * 100) / 100,
-      total: Math.round(room.nightlyRate * nights * 1.12 * 100) / 100,
-      amenities: this.getRoomAmenities(room.roomType),
-      photos: this.getRoomPhotos(room.roomType)
+    // Transform database fields to UI format
+    return response.data.map(booking => ({
+      Id: booking.Id,
+      guestName: booking.guest_name_c || '',
+      roomNumber: booking.room_number_c || '',
+      checkInDate: booking.check_in_date_c || '',
+      checkOutDate: booking.check_out_date_c || '',
+      status: booking.status_c || '',
+      totalAmount: booking.total_amount_c || 0,
+      specialRequests: booking.special_requests_c || ''
     }));
-    
-    return availableRooms;
-  },
-
-  // Calculate number of nights
-  calculateNights(checkIn, checkOut) {
-    const start = new Date(checkIn);
-    const end = new Date(checkOut);
-    const diffTime = Math.abs(end - start);
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  },
-
-  // Calculate total cost
-  calculateTotal(nightlyRate, nights) {
-    const subtotal = nightlyRate * nights;
-    const taxes = subtotal * 0.12;
-    return {
-      nights,
-      subtotal: Math.round(subtotal * 100) / 100,
-      taxes: Math.round(taxes * 100) / 100,
-      total: Math.round((subtotal + taxes) * 100) / 100
-    };
-  },
-
-  // Get room amenities based on type
-  getRoomAmenities(roomType) {
-    const amenityMap = {
-      'Standard Queen': ['Free WiFi', 'Air Conditioning', 'TV', 'Coffee Maker'],
-      'Standard King': ['Free WiFi', 'Air Conditioning', 'TV', 'Coffee Maker', 'Work Desk'],
-      'Deluxe Queen': ['Free WiFi', 'Air Conditioning', 'TV', 'Coffee Maker', 'Balcony', 'Mini Fridge'],
-      'Deluxe King': ['Free WiFi', 'Air Conditioning', 'TV', 'Coffee Maker', 'Work Desk', 'Balcony', 'Mini Fridge'],
-      'Suite': ['Free WiFi', 'Air Conditioning', 'TV', 'Coffee Maker', 'Living Area', 'Kitchenette', 'Balcony'],
-      'Penthouse Suite': ['Free WiFi', 'Air Conditioning', 'TV', 'Coffee Maker', 'Living Area', 'Full Kitchen', 'Balcony', 'Jacuzzi']
-    };
-    return amenityMap[roomType] || ['Free WiFi', 'Air Conditioning', 'TV'];
-  },
-
-  // Get room photos (placeholder URLs)
-  getRoomPhotos(roomType) {
-    return [
-      'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=400',
-      'https://images.unsplash.com/photo-1566665797739-1674de7a421a?w=400'
-    ];
-  },
-
-  // Create new booking
-  async create(bookingData) {
-    await delay(600);
-    
-    const newBooking = {
-      ...bookingData,
-Id: Math.max(...bookings.map(b => b.Id), 0) + 1,
-      status: 'pending_payment',
-      createdAt: new Date().toISOString()
-    };
-    
-    bookings.push(newBooking);
-    
-    // Log audit entry
-    this.logAuditEntry({
-      bookingId: newBooking.Id,
-      action: 'booking_created',
-      oldValue: null,
-      newValue: newBooking,
-      timestamp: new Date().toISOString(),
-      user: 'System'
-    });
-    
-    return { ...newBooking };
-  },
-
-  // Update booking
-  async update(id, updateData) {
-    await delay(400);
-    const bookingIndex = bookings.findIndex(b => b.Id === parseInt(id));
-    if (bookingIndex === -1) {
-      throw new Error(`Booking with ID ${id} not found`);
-    }
-    
-    const oldBooking = { ...bookings[bookingIndex] };
-    
-    bookings[bookingIndex] = {
-      ...bookings[bookingIndex],
-      ...updateData,
-      Id: parseInt(id),
-      updatedAt: new Date().toISOString()
-    };
-    
-    // Log audit entry
-    this.logAuditEntry({
-      bookingId: parseInt(id),
-      action: 'booking_updated',
-      oldValue: oldBooking,
-      newValue: bookings[bookingIndex],
-      timestamp: new Date().toISOString(),
-      user: 'System'
-    });
-    
-    return { ...bookings[bookingIndex] };
-  },
-
-  // Delete booking
-  async delete(id) {
-    await delay(300);
-    const index = bookings.findIndex(b => b.Id === parseInt(id));
-    if (index === -1) {
-      throw new Error(`Booking with ID ${id} not found`);
-    }
-    
-    const deletedBooking = { ...bookings[index] };
-    
-    bookings.splice(index, 1);
-    
-    // Log audit entry
-    this.logAuditEntry({
-      bookingId: parseInt(id),
-      action: 'booking_deleted',
-      oldValue: deletedBooking,
-      newValue: null,
-      timestamp: new Date().toISOString(),
-      user: 'System'
-    });
-    
-    return { success: true };
+  } catch (error) {
+    console.error("Error fetching bookings:", error?.message || error);
+    toast.error("Failed to fetch bookings");
+    return [];
   }
 };
+
+// Get booking by ID
+const getById = async (id) => {
+  try {
+    await delay(200);
+    
+    const apperClient = getApperClient();
+    if (!apperClient) {
+      throw new Error('ApperClient not initialized');
+    }
+
+    const params = {
+      fields: [
+        { field: { Name: "Id" } },
+        { field: { Name: "guest_name_c" } },
+        { field: { Name: "room_number_c" } },
+        { field: { Name: "check_in_date_c" } },
+        { field: { Name: "check_out_date_c" } },
+        { field: { Name: "status_c" } },
+        { field: { Name: "total_amount_c" } },
+        { field: { Name: "special_requests_c" } }
+      ]
+    };
+
+    const response = await apperClient.getRecordById('booking_c', id, params);
+
+    if (!response.success || !response.data) {
+      console.error(response.message || 'Booking not found');
+      return null;
+    }
+
+    const booking = response.data;
+    return {
+      Id: booking.Id,
+      guestName: booking.guest_name_c || '',
+      roomNumber: booking.room_number_c || '',
+      checkInDate: booking.check_in_date_c || '',
+      checkOutDate: booking.check_out_date_c || '',
+      status: booking.status_c || '',
+      totalAmount: booking.total_amount_c || 0,
+      specialRequests: booking.special_requests_c || ''
+    };
+  } catch (error) {
+    console.error(`Error fetching booking ${id}:`, error?.message || error);
+    return null;
+  }
+};
+
+// Create new booking
+const create = async (bookingData) => {
+  try {
+    await delay(400);
+    
+    const apperClient = getApperClient();
+    if (!apperClient) {
+      throw new Error('ApperClient not initialized');
+    }
+
+    // Transform UI format to database format - only Updateable fields
+    const records = Array.isArray(bookingData) ? bookingData : [bookingData];
+    const params = {
+      records: records.map(booking => ({
+        guest_name_c: booking.guestName || '',
+        room_number_c: booking.roomNumber || '',
+        check_in_date_c: booking.checkInDate || '',
+        check_out_date_c: booking.checkOutDate || '',
+        status_c: booking.status || 'Confirmed',
+        total_amount_c: parseFloat(booking.totalAmount) || 0,
+        special_requests_c: booking.specialRequests || ''
+      }))
+    };
+
+    const response = await apperClient.createRecord('booking_c', params);
+
+    if (!response.success) {
+      console.error(response.message);
+      toast.error(response.message);
+      return [];
+    }
+
+    if (response.results) {
+      const successful = response.results.filter(r => r.success);
+      const failed = response.results.filter(r => !r.success);
+
+      if (failed.length > 0) {
+        console.error(`Failed to create ${failed.length} bookings:`, failed);
+        failed.forEach(record => {
+          if (record.message) toast.error(record.message);
+        });
+      }
+
+      if (successful.length > 0) {
+        toast.success(`${successful.length} booking(s) created successfully`);
+      }
+
+      return successful.map(r => r.data);
+    }
+
+    return [];
+  } catch (error) {
+    console.error("Error creating bookings:", error?.message || error);
+    toast.error("Failed to create bookings");
+    return [];
+  }
+};
+
+// Update booking
+const update = async (id, bookingData) => {
+  try {
+    await delay(400);
+    
+    const apperClient = getApperClient();
+    if (!apperClient) {
+      throw new Error('ApperClient not initialized');
+    }
+
+    // Transform UI format to database format - only Updateable fields plus Id
+    const params = {
+      records: [{
+        Id: id,
+        guest_name_c: bookingData.guestName || '',
+        room_number_c: bookingData.roomNumber || '',
+        check_in_date_c: bookingData.checkInDate || '',
+        check_out_date_c: bookingData.checkOutDate || '',
+        status_c: bookingData.status || '',
+        total_amount_c: parseFloat(bookingData.totalAmount) || 0,
+        special_requests_c: bookingData.specialRequests || ''
+      }]
+    };
+
+    const response = await apperClient.updateRecord('booking_c', params);
+
+    if (!response.success) {
+      console.error(response.message);
+      toast.error(response.message);
+      return null;
+    }
+
+    if (response.results) {
+      const successful = response.results.filter(r => r.success);
+      const failed = response.results.filter(r => !r.success);
+
+      if (failed.length > 0) {
+        console.error(`Failed to update booking:`, failed);
+        failed.forEach(record => {
+          if (record.message) toast.error(record.message);
+        });
+        return null;
+      }
+
+      if (successful.length > 0) {
+        toast.success('Booking updated successfully');
+        return successful[0].data;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error updating booking:", error?.message || error);
+    toast.error("Failed to update booking");
+    return null;
+  }
+};
+
+// Delete booking
+const deleteBooking = async (id) => {
+  try {
+    await delay(300);
+    
+    const apperClient = getApperClient();
+    if (!apperClient) {
+      throw new Error('ApperClient not initialized');
+    }
+
+    const params = {
+      RecordIds: Array.isArray(id) ? id : [id]
+    };
+
+    const response = await apperClient.deleteRecord('booking_c', params);
+
+    if (!response.success) {
+      console.error(response.message);
+      toast.error(response.message);
+      return false;
+    }
+
+    if (response.results) {
+      const failed = response.results.filter(r => !r.success);
+
+      if (failed.length > 0) {
+        console.error(`Failed to delete booking(s):`, failed);
+        failed.forEach(record => {
+          if (record.message) toast.error(record.message);
+        });
+        return false;
+      }
+
+      toast.success('Booking deleted successfully');
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error("Error deleting booking:", error?.message || error);
+    toast.error("Failed to delete booking");
+    return false;
+  }
+};
+
+// Update booking status
+const updateStatus = async (id, newStatus) => {
+  try {
+    await delay(300);
+    
+    const apperClient = getApperClient();
+    if (!apperClient) {
+      throw new Error('ApperClient not initialized');
+    }
+
+    const params = {
+      records: [{
+        Id: id,
+        status_c: newStatus
+      }]
+    };
+
+    const response = await apperClient.updateRecord('booking_c', params);
+
+    if (!response.success) {
+      console.error(response.message);
+      toast.error(response.message);
+      return null;
+    }
+
+    if (response.results) {
+      const successful = response.results.filter(r => r.success);
+      const failed = response.results.filter(r => !r.success);
+
+      if (failed.length > 0) {
+        console.error(`Failed to update booking status:`, failed);
+        return null;
+      }
+
+      if (successful.length > 0) {
+        toast.success('Booking status updated successfully');
+        return successful[0].data;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error updating booking status:", error?.message || error);
+    toast.error("Failed to update booking status");
+    return null;
+  }
+};
+
+// Get available rooms for booking
+const getAvailableRooms = async () => {
+  try {
+    await delay(300);
+    
+    const apperClient = getApperClient();
+    if (!apperClient) {
+      throw new Error('ApperClient not initialized');
+    }
+
+    const params = {
+      fields: [
+        { field: { Name: "Id" } },
+        { field: { Name: "room_number_c" } },
+        { field: { Name: "room_type_c" } },
+        { field: { Name: "price_per_night_c" } },
+        { field: { Name: "status_c" } }
+      ],
+      whereGroups: [{
+        operator: "OR",
+        subGroups: [{
+          conditions: [{
+            fieldName: "status_c",
+            operator: "EqualTo",
+            values: ["Available"]
+          }],
+          operator: ""
+        }]
+      }],
+      pagingInfo: { limit: 100, offset: 0 }
+    };
+
+    const response = await apperClient.fetchRecords('room_c', params);
+
+    if (!response.success) {
+      console.error(response.message);
+      return [];
+    }
+
+    return response.data || [];
+  } catch (error) {
+    console.error("Error fetching available rooms:", error?.message || error);
+    return [];
+  }
+};
+
+export const bookingService = {
+  getAll,
+  getById,
+  create,
+  update,
+  deleteBooking,
+  updateStatus,
+  getAvailableRooms,
+};
+
 export default bookingService;
