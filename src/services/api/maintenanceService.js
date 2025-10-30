@@ -370,7 +370,7 @@ this.apperClient = null;
         fields: this.vendorFields
       });
 
-      if (!response.success) {
+if (!response.success) {
         console.error('Failed to fetch vendors:', response.message);
         toast.error(response.message);
         return [];
@@ -381,7 +381,6 @@ this.apperClient = null;
       console.error('Error fetching vendors:', error);
       toast.error('Failed to load vendors');
       return [];
-return [];
     }
   }
 }
